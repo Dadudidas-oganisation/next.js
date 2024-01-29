@@ -24,15 +24,35 @@ export async function proxyRequest(
     target,
     changeOrigin: true,
     ignorePath: true,
-    xfwd: true,
     ws: true,
     // we limit proxy requests to 30s by default, in development
     // we don't time out WebSocket requests to allow proxying
     proxyTimeout: proxyTimeout === null ? undefined : proxyTimeout || 30_000,
+    headers: {
+      'x-forwarded-host': req.headers.host || '',
+    },
   })
 
   await new Promise((proxyResolve, proxyReject) => {
     let finished = false
+
+    // http-proxy does not properly detect a client disconnect in newer
+    // versions of Node.js. This is caused because it only listens for the
+    // `aborted` event on the our request object, but it also fully reads
+    // and closes the request object. Node **will not** fire `aborted` when
+    // the request is already closed. Listening for `close` on our response
+    // object will detect the disconnect, and we can abort the proxy's
+    // connection.
+    proxy.on('proxyReq', (proxyReq) => {
+      res.on('close', () => proxyReq.destroy())
+    })
+    proxy.on('proxyRes', (proxyRes) => {
+      if (res.destroyed) {
+        proxyRes.destroy()
+      } else {
+        res.on('close', () => proxyRes.destroy())
+      }
+    })
 
     proxy.on('proxyRes', (proxyRes, innerReq, innerRes) => {
       const cleanup = (err: any) => {
@@ -59,7 +79,7 @@ export async function proxyRequest(
         finished = true
         proxyReject(err)
 
-        if (!res.closed) {
+        if (!res.destroyed) {
           res.statusCode = 500
           res.end('Internal Server Error')
         }

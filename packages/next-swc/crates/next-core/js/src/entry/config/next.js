@@ -2,6 +2,7 @@ import loadConfig from 'next/dist/server/config'
 import loadCustomRoutes from 'next/dist/lib/load-custom-routes'
 import { PHASE_DEVELOPMENT_SERVER } from 'next/dist/shared/lib/constants'
 import assert from 'node:assert'
+import * as path from 'node:path'
 
 const loadNextConfig = async (silent) => {
   const nextConfig = await loadConfig(
@@ -20,10 +21,35 @@ const loadNextConfig = async (silent) => {
   nextConfig.exportPathMap = nextConfig.exportPathMap && {}
   nextConfig.webpack = nextConfig.webpack && {}
 
+  // Transform the `modularizeImports` option
+  nextConfig.modularizeImports = nextConfig.modularizeImports
+    ? Object.fromEntries(
+        Object.entries(nextConfig.modularizeImports).map(([mod, config]) => [
+          mod,
+          {
+            ...config,
+            transform:
+              typeof config.transform === 'string'
+                ? config.transform
+                : Object.entries(config.transform).map(([key, value]) => [
+                    key,
+                    value,
+                  ]),
+          },
+        ])
+      )
+    : undefined
+
   if (nextConfig.experimental?.turbopack?.loaders) {
     ensureLoadersHaveSerializableOptions(
       nextConfig.experimental.turbopack.loaders
     )
+  }
+
+  // loaderFile is an absolute path, we need it to be relative for turbopack.
+  if (nextConfig.images.loaderFile) {
+    nextConfig.images.loaderFile =
+      './' + path.relative(process.cwd(), nextConfig.images.loaderFile)
   }
 
   return {

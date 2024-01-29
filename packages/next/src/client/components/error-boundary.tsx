@@ -2,6 +2,7 @@
 
 import React from 'react'
 import { usePathname } from './navigation'
+import { isNextRouterError } from './is-next-router-error'
 
 const styles = {
   error: {
@@ -30,17 +31,37 @@ export type ErrorComponent = React.ComponentType<{
 
 export interface ErrorBoundaryProps {
   children?: React.ReactNode
-  errorComponent: ErrorComponent
+  errorComponent: ErrorComponent | undefined
   errorStyles?: React.ReactNode | undefined
+  errorScripts?: React.ReactNode | undefined
 }
 
 interface ErrorBoundaryHandlerProps extends ErrorBoundaryProps {
   pathname: string
+  errorComponent: ErrorComponent
 }
 
 interface ErrorBoundaryHandlerState {
   error: Error | null
   previousPathname: string
+}
+
+// if we are revalidating we want to re-throw the error so the
+// function crashes so we can maintain our previous cache
+// instead of caching the error page
+function HandleISRError({ error }: { error: any }) {
+  if (typeof (fetch as any).__nextGetStaticStore === 'function') {
+    const store:
+      | undefined
+      | import('./static-generation-async-storage.external').StaticGenerationStore =
+      (fetch as any).__nextGetStaticStore()?.getStore()
+
+    if (store?.isRevalidate || store?.isStaticGeneration) {
+      console.error(error)
+      throw error
+    }
+  }
+  return null
 }
 
 export class ErrorBoundaryHandler extends React.Component<
@@ -53,6 +74,12 @@ export class ErrorBoundaryHandler extends React.Component<
   }
 
   static getDerivedStateFromError(error: Error) {
+    if (isNextRouterError(error)) {
+      // Re-throw if an expected internal Next.js router error occurs
+      // this means it should be handled by a different boundary (such as a NotFound boundary in a parent segment)
+      throw error
+    }
+
     return { error }
   }
 
@@ -86,7 +113,9 @@ export class ErrorBoundaryHandler extends React.Component<
     if (this.state.error) {
       return (
         <>
+          <HandleISRError error={this.state.error} />
           {this.props.errorStyles}
+          {this.props.errorScripts}
           <this.props.errorComponent
             error={this.state.error}
             reset={this.reset}
@@ -105,6 +134,7 @@ export function GlobalError({ error }: { error: any }) {
     <html id="__next_error__">
       <head></head>
       <body>
+        <HandleISRError error={error} />
         <div style={styles.error}>
           <div>
             <h2 style={styles.text}>
@@ -122,6 +152,10 @@ export function GlobalError({ error }: { error: any }) {
   )
 }
 
+// Exported so that the import signature in the loaders can be identical to user
+// supplied custom global error signatures.
+export default GlobalError
+
 /**
  * Handles errors through `getDerivedStateFromError`.
  * Renders the provided error component and provides a way to `reset` the error boundary state.
@@ -134,6 +168,7 @@ export function GlobalError({ error }: { error: any }) {
 export function ErrorBoundary({
   errorComponent,
   errorStyles,
+  errorScripts,
   children,
 }: ErrorBoundaryProps & { children: React.ReactNode }): JSX.Element {
   const pathname = usePathname()
@@ -143,6 +178,7 @@ export function ErrorBoundary({
         pathname={pathname}
         errorComponent={errorComponent}
         errorStyles={errorStyles}
+        errorScripts={errorScripts}
       >
         {children}
       </ErrorBoundaryHandler>

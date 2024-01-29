@@ -8,7 +8,7 @@ import { getNamedMiddlewareRegex } from '../../../shared/lib/router/utils/route-
 import { getModuleBuildInfo } from '../loaders/get-module-build-info'
 import { getSortedRoutes } from '../../../shared/lib/router/utils'
 import { webpack, sources } from 'next/dist/compiled/webpack/webpack'
-import { isMatch } from 'next/dist/compiled/micromatch'
+import picomatch from 'next/dist/compiled/picomatch'
 import path from 'path'
 import {
   EDGE_RUNTIME_WEBPACK,
@@ -20,14 +20,14 @@ import {
   SUBRESOURCE_INTEGRITY_MANIFEST,
   NEXT_FONT_MANIFEST,
   SERVER_REFERENCE_MANIFEST,
+  PRERENDER_MANIFEST,
 } from '../../../shared/lib/constants'
-import { MiddlewareConfig } from '../../analysis/get-page-static-info'
-import { Telemetry } from '../../../telemetry/storage'
+import type { MiddlewareConfig } from '../../analysis/get-page-static-info'
+import type { Telemetry } from '../../../telemetry/storage'
 import { traceGlobals } from '../../../trace/shared'
 import { EVENT_BUILD_FEATURE_USAGE } from '../../../telemetry/events'
 import { normalizeAppPath } from '../../../shared/lib/router/utils/app-paths'
 import { INSTRUMENTATION_HOOK_FILENAME } from '../../../lib/constants'
-import { NextBuildContext } from '../../build-context'
 
 const KNOWN_SAFE_DYNAMIC_PACKAGES =
   require('../../../lib/known-edge-safe-packages.json') as string[]
@@ -90,6 +90,7 @@ function isUsingIndirectEvalAndUsedByExports(args: {
 function getEntryFiles(
   entryFiles: string[],
   meta: EntryMetadata,
+  hasInstrumentationHook: boolean,
   opts: {
     sriEnabled: boolean
   }
@@ -123,8 +124,12 @@ function getEntryFiles(
     files.push(`server/${NEXT_FONT_MANIFEST}.js`)
   }
 
-  if (NextBuildContext!.hasInstrumentationHook) {
+  if (hasInstrumentationHook) {
     files.push(`server/edge-${INSTRUMENTATION_HOOK_FILENAME}.js`)
+  }
+
+  if (process.env.NODE_ENV === 'production') {
+    files.push(PRERENDER_MANIFEST.replace('json', 'js'))
   }
 
   files.push(
@@ -151,6 +156,11 @@ function getCreateAssets(params: {
       functions: {},
       version: 2,
     }
+
+    const hasInstrumentationHook = compilation.entrypoints.has(
+      INSTRUMENTATION_HOOK_FILENAME
+    )
+
     for (const entrypoint of compilation.entrypoints.values()) {
       if (!entrypoint.name) {
         continue
@@ -183,7 +193,12 @@ function getCreateAssets(params: {
       ]
 
       const edgeFunctionDefinition: EdgeFunctionDefinition = {
-        files: getEntryFiles(entrypoint.getFiles(), metadata, opts),
+        files: getEntryFiles(
+          entrypoint.getFiles(),
+          metadata,
+          hasInstrumentationHook,
+          opts
+        ),
         name: entrypoint.name,
         page: page,
         matchers,
@@ -262,7 +277,8 @@ function isDynamicCodeEvaluationAllowed(
   }
 
   const name = fileName.replace(rootDir ?? '', '')
-  return isMatch(name, middlewareConfig?.unstable_allowDynamicGlobs ?? [])
+
+  return picomatch(middlewareConfig?.unstable_allowDynamicGlobs ?? [])(name)
 }
 
 function buildUnsupportedApiError({
@@ -465,7 +481,7 @@ function getCodeAnalyzer(params: {
           buildInfo.importLocByPath = new Map()
         }
 
-        const importedModule = node.source.value?.toString()!
+        const importedModule = node.source.value?.toString()
         buildInfo.importLocByPath.set(importedModule, {
           sourcePosition: {
             ...node.loc.start,
@@ -536,9 +552,12 @@ function getExtractMetadata(params: {
         continue
       }
       const entryDependency = entry.dependencies?.[0]
-      const { rootDir, route } = getModuleBuildInfo(
+      const resolvedModule =
         compilation.moduleGraph.getResolvedModule(entryDependency)
-      )
+      if (!resolvedModule) {
+        continue
+      }
+      const { rootDir, route } = getModuleBuildInfo(resolvedModule)
 
       const { moduleGraph } = compilation
       const modules = new Set<webpack.NormalModule>()
@@ -582,7 +601,7 @@ function getExtractMetadata(params: {
           const resource = module.resource
           const hasOGImageGeneration =
             resource &&
-            /[\\/]node_modules[\\/]@vercel[\\/]og[\\/]dist[\\/]index\.(edge|node)\.js$|[\\/]next[\\/]dist[\\/](esm[\\/])?server[\\/]web[\\/]spec-extension[\\/]image-response\.js$/.test(
+            /[\\/]node_modules[\\/]@vercel[\\/]og[\\/]dist[\\/]index\.(edge|node)\.js$|[\\/]next[\\/]dist[\\/](esm[\\/])?server[\\/]og[\\/]image-response\.js$/.test(
               resource
             )
 

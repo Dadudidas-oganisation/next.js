@@ -38,12 +38,13 @@ enum NextServerSpan {
 enum NextNodeServerSpan {
   compression = 'NextNodeServer.compression',
   getBuildId = 'NextNodeServer.getBuildId',
+  createComponentTree = 'NextNodeServer.createComponentTree',
+  getLayoutOrPageModule = 'NextNodeServer.getLayoutOrPageModule',
   generateStaticRoutes = 'NextNodeServer.generateStaticRoutes',
   generateFsStaticRoutes = 'NextNodeServer.generateFsStaticRoutes',
   generatePublicRoutes = 'NextNodeServer.generatePublicRoutes',
   generateImageRoutes = 'NextNodeServer.generateImageRoutes.route',
   sendRenderResult = 'NextNodeServer.sendRenderResult',
-  sendStatic = 'NextNodeServer.sendStatic',
   proxyRequest = 'NextNodeServer.proxyRequest',
   runApi = 'NextNodeServer.runApi',
   render = 'NextNodeServer.render',
@@ -64,6 +65,7 @@ enum NextNodeServerSpan {
   route = 'route',
   onProxyReq = 'onProxyReq',
   apiResolver = 'apiResolver',
+  internalFetch = 'internalFetch',
 }
 
 enum StartServerSpan {
@@ -99,6 +101,7 @@ enum AppRouteRouteHandlersSpan {
 
 enum ResolveMetadataSpan {
   generateMetadata = 'ResolveMetadata.generateMetadata',
+  generateViewport = 'ResolveMetadata.generateViewport',
 }
 
 type SpanTypes =
@@ -125,6 +128,10 @@ export const NextVanillaSpanAllowlist = [
   NodeSpan.runHandler,
   AppRouteRouteHandlersSpan.runHandler,
   ResolveMetadataSpan.generateMetadata,
+  ResolveMetadataSpan.generateViewport,
+  NextNodeServerSpan.createComponentTree,
+  NextNodeServerSpan.findPageComponents,
+  NextNodeServerSpan.getLayoutOrPageModule,
 ]
 
 export {
@@ -133,7 +140,6 @@ export {
   NextServerSpan,
   NextNodeServerSpan,
   StartServerSpan,
-  SpanTypes,
   RenderSpan,
   RouterSpan,
   AppRenderSpan,
@@ -141,3 +147,5 @@ export {
   AppRouteRouteHandlersSpan,
   ResolveMetadataSpan,
 }
+
+export type { SpanTypes }

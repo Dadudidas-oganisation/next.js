@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use turbo_tasks::{trace::TraceRawVcs, Vc};
 use turbopack_binding::{
     turbo::tasks_fs::FileSystemPath,
-    turbopack::core::issue::{IssueExt, IssueSeverity},
+    turbopack::core::issue::{IssueExt, IssueSeverity, StyledString},
 };
 
 use super::options::NextFontGoogleOptions;
@@ -20,7 +20,7 @@ use crate::{
         issue::NextFontIssue,
         util::{get_scoped_font_family, FontFamilyType},
     },
-    util::load_next_json,
+    util::load_next_js_templateon,
 };
 
 /// An entry in the Google fonts metrics map
@@ -54,8 +54,11 @@ pub(super) async fn get_font_fallback(
     Ok(match &options.fallback {
         Some(fallback) => FontFallback::Manual(Vc::cell(fallback.clone())).cell(),
         None => {
-            let metrics_json =
-                load_next_json(context, "/dist/server/capsize-font-metrics.json").await?;
+            let metrics_json = load_next_js_templateon(
+                context,
+                "dist/server/capsize-font-metrics.json".to_string(),
+            )
+            .await?;
             let fallback = lookup_fallback(
                 &options.font_family,
                 metrics_json,
@@ -79,11 +82,15 @@ pub(super) async fn get_font_fallback(
                 Err(_) => {
                     NextFontIssue {
                         path: context,
-                        title: Vc::cell(format!(
+                        title: StyledString::Text(format!(
                             "Failed to find font override values for font `{}`",
                             &options.font_family,
-                        )),
-                        description: Vc::cell("Skipping generating a fallback font.".to_owned()),
+                        ))
+                        .cell(),
+                        description: StyledString::Text(
+                            "Skipping generating a fallback font.".to_owned(),
+                        )
+                        .cell(),
                         severity: IssueSeverity::Warning.cell(),
                     }
                     .cell()

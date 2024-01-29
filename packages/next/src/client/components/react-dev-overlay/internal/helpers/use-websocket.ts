@@ -1,32 +1,20 @@
 import { useCallback, useContext, useEffect, useRef } from 'react'
-import { GlobalLayoutRouterContext } from '../../../../../shared/lib/app-router-context'
-import { getSocketProtocol } from './get-socket-protocol'
+import { GlobalLayoutRouterContext } from '../../../../../shared/lib/app-router-context.shared-runtime'
+import { getSocketUrl } from './get-socket-url'
+import type { TurbopackMsgToBrowser } from '../../../../../server/dev/hot-reloader-types'
 
-export function useWebsocket(
-  assetPrefix: string,
-  shouldSubscribe: boolean = true
-) {
+export function useWebsocket(assetPrefix: string) {
   const webSocketRef = useRef<WebSocket>()
 
   useEffect(() => {
-    if (webSocketRef.current || !shouldSubscribe) {
+    if (webSocketRef.current) {
       return
     }
 
-    const { hostname, port } = window.location
-    const protocol = getSocketProtocol(assetPrefix)
-    const normalizedAssetPrefix = assetPrefix.replace(/^\/+/, '')
-
-    let url = `${protocol}://${hostname}:${port}${
-      normalizedAssetPrefix ? `/${normalizedAssetPrefix}` : ''
-    }`
-
-    if (normalizedAssetPrefix.startsWith('http')) {
-      url = `${protocol}://${normalizedAssetPrefix.split('://')[1]}`
-    }
+    const url = getSocketUrl(assetPrefix)
 
     webSocketRef.current = new window.WebSocket(`${url}/_next/webpack-hmr`)
-  }, [assetPrefix, shouldSubscribe])
+  }, [assetPrefix])
 
   return webSocketRef
 }
@@ -43,6 +31,58 @@ export function useSendMessage(webSocketRef: ReturnType<typeof useWebsocket>) {
     [webSocketRef]
   )
   return sendMessage
+}
+
+export function useTurbopack(sendMessage: ReturnType<typeof useSendMessage>) {
+  const turbopackState = useRef<{
+    init: boolean
+    queue: Array<TurbopackMsgToBrowser> | undefined
+    callback: ((msg: TurbopackMsgToBrowser) => void) | undefined
+  }>({
+    init: false,
+    // Until the dynamic import resolves, queue any turbopack messages which will be replayed.
+    queue: [],
+    callback: undefined,
+  })
+
+  const processTurbopackMessage = useCallback((msg: TurbopackMsgToBrowser) => {
+    const { callback, queue } = turbopackState.current
+    if (callback) {
+      callback(msg)
+    } else {
+      queue!.push(msg)
+    }
+  }, [])
+
+  useEffect(() => {
+    const { current: initCurrent } = turbopackState
+    // TODO(WEB-1589): only install if `process.turbopack` set.
+    if (initCurrent.init) {
+      return
+    }
+    initCurrent.init = true
+
+    import(
+      // @ts-expect-error requires "moduleResolution": "node16" in tsconfig.json and not .ts extension
+      '@vercel/turbopack-ecmascript-runtime/dev/client/hmr-client.ts'
+    ).then(({ connect }) => {
+      const { current } = turbopackState
+      connect({
+        addMessageListener(cb: (msg: TurbopackMsgToBrowser) => void) {
+          current.callback = cb
+
+          // Replay all Turbopack messages before we were able to establish the HMR client.
+          for (const msg of current.queue!) {
+            cb(msg)
+          }
+          current.queue = undefined
+        },
+        sendMessage,
+      })
+    })
+  }, [sendMessage])
+
+  return processTurbopackMessage
 }
 
 export function useWebsocketPing(
